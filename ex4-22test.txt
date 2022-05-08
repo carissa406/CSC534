@@ -1,0 +1,153 @@
+from pyspark.ml.linalg import Vectors
+from pyspark.ml.classification import LogisticRegression
+
+training = spark.createDataFrame([
+ (1.0, Vectors.dense([0.0, 1.1, 0.1])),
+ (0.0, Vectors.dense([2.0, 1.0, -1.0])),
+ (0.0, Vectors.dense([2.0, 1.3, 1.0])),
+ (1.0, Vectors.dense([0.0, 1.2, -0.5]))], ["label", "features"])
+ 
+lr = LogisticRegression(maxIter=10, regParam=0.01)
+print("LogisticRegression parameters:\n" + lr.explainParams() + "\n")
+
+model1 = lr.fit(training)
+
+print("Model 1 was fit using parameters: ")
+print(model1.extractParamMap())
+
+paramMap = {lr.maxIter: 20}
+paramMap[lr.maxIter] = 30 
+paramMap.update({lr.regParam: 0.1, lr.threshold: 0.55})
+
+paramMap2 = {lr.probabilityCol: "myProbability"}
+paramMapCombined = paramMap.copy()
+paramMapCombined.update(paramMap2)
+
+model2 = lr.fit(training, paramMapCombined)
+print("Model 2 was fit using parameters: ")
+print(model2.extractParamMap())
+
+test = spark.createDataFrame([
+ (1.0, Vectors.dense([-1.0, 1.5, 1.3])),
+ (0.0, Vectors.dense([3.0, 2.0, -0.1])),
+ (1.0, Vectors.dense([0.0, 2.2, -1.5]))], ["label", "features"])
+ 
+prediction = model2.transform(test)
+result = prediction.select("features", "label", "myProbability", "prediction") \
+.collect()
+
+for row in result:
+ print("features=%s, label=%s -> prob=%s, prediction=%s"
+ % (row.features, row.label, row.myProbability, row.prediction))
+ ---------------
+ 
+from pyspark.ml import Pipeline
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.feature import HashingTF, Tokenizer
+
+training = spark.createDataFrame([
+    (0, "a b c d e spark", 1.0),
+    (1, "b d", 0.0),
+    (2, "spark f g h", 1.0),
+    (3, "hadoop mapreduce", 0.0)
+], ["id", "text", "label"])
+
+tokenizer = Tokenizer(inputCol="text", outputCol="words")
+hashingTF = HashingTF(inputCol=tokenizer.getOutputCol(), outputCol="features")
+lr = LogisticRegression(maxIter=10, regParam=0.001)
+pipeline = Pipeline(stages=[tokenizer, hashingTF, lr])
+
+model = pipeline.fit(training)
+
+test = spark.createDataFrame([
+    (4, "spark i j k"),
+    (5, "l m n"),
+    (6, "spark hadoop spark"),
+    (7, "apache hadoop")
+], ["id", "text"])
+
+prediction = model.transform(test)
+selected = prediction.select("id", "text", "probability", "prediction")
+for row in selected.collect():
+    rid, text, prob, prediction = row
+    print("(%d, %s) --> prob=%s, prediction=%f" % (rid, text, str(prob), prediction))
+	
+	---------------
+	
+	
+/user/data/CSC534BDA/COVID19-Retweet/TweetsCOV19.tsv
+
+#train = spark.read.csv("/user/data/CSC534BDA/COVID19-Retweet/TweetsCOV19-train.tsv", sep=r'\t', header=True)
+
+train = spark.read.option("header", "false").option("inferSchema", "true").csv("/user/data/CSC534BDA/COVID19-Retweet/TweetsCOV19-train.tsv", sep=r'\t')
+train = train.toDF("TweetID", "Username", "TimeStamp", "Followers", "Friends", "Retweets", "Favorites", "Entities", "Sentiment", "Mentions", "Hashtags", "URLs")
+
+test = spark.read.option("header", "false").option("inferSchema", "true").csv("/user/data/CSC534BDA/COVID19-Retweet/TweetsCOV19-test.tsv", sep=r'\t')
+test = test.toDF("TweetID", "Username", "TimeStamp", "Followers", "Friends", "Retweets", "Favorites", "Entities", "Sentiment", "Mentions", "Hashtags", "URLs")
+
+from pyspark.ml.classification import LogisticRegression
+
+lr = LogisticRegression(maxIter=10, regParam=0.01)
+lrModel = lr.fit(train)
+
+from pyspark.ml.feature import VectorAssembler
+vectorAssembler = VectorAssembler(inputCols = train.colums[1:-1]
+
+
+--------
+
+from pyspark.ml.linalg import Vectors
+from pyspark.ml.classification import LogisticRegression
+----------------
+
+
+raw_df = spark.read.csv("/user/data/CSC534BDA/COVID19-Retweet/TweetsCOV19.tsv", sep=r'\t', header=False, inferSchema=True)
+df = raw_df.toDF("TweetID", "Username", "TimeStamp", "Followers", "Friends", "Retweets", "Favorites", "Entities", "Sentiment", "Mentions", "Hashtags", "URLs")
+
+filtered_df = df.select(["Followers", "Friends", "Retweets", "Favorites"])
+filtered_df.show(2)
+
+from pyspark.ml.feature import VectorAssembler
+assembler = VectorAssembler(inputCols=["Followers", "Friends", "Favorites"], outputCol="features")
+features_df = assembler.transform(filtered_df)
+features_df.show(10)
+
+(train, test) = features_df.randomSplit([0.8, 0.2], seed=11)
+train.count()
+test.count()
+
+from pyspark.ml.classification import LogisticRegression
+lr = LogisticRegression(maxIter=10, regParam=0.01, labelCol="Retweets", featuresCol="features")
+model = lr.fit(train)
+-------------------
+
+
+
+raw_train_df = spark.read.csv("/user/data/CSC534BDA/COVID19-Retweet/TweetsCOV19-train.tsv", sep=r'\t', header=False, inferSchema=True)
+train = raw_train_df.toDF("TweetID", "Username", "TimeStamp", "Followers", "Friends", "Retweets", "Favorites", "Entities", "Sentiment", "Mentions", "Hashtags", "URLs")
+
+raw_test_df = spark.read.csv("/user/data/CSC534BDA/COVID19-Retweet/TweetsCOV19-test.tsv", sep=r'\t', header=False, inferSchema=True)
+test = raw_test_df.toDF("TweetID", "Username", "TimeStamp", "Followers", "Friends", "Retweets", "Favorites", "Entities", "Sentiment", "Mentions", "Hashtags", "URLs")
+
+filtered_train_df = train.select(["Followers", "Friends", "Retweets", "Favorites"])
+filtered_train_df.show(2)
+filtered_test_df = test.select(["Followers", "Friends", "Retweets", "Favorites"])
+filtered_test_df.show(2)
+
+from pyspark.ml.feature import VectorAssembler
+assembler = VectorAssembler(inputCols=["Followers", "Friends", "Favorites"], outputCol="features")
+train = assembler.transform(filtered_train_df)
+train.show(10)
+test = assembler.transform(filtered_test_df)
+
+from pyspark.ml.classification import LogisticRegression
+lr = LogisticRegression(maxIter=10, regParam=0.01, labelCol="Retweets", featuresCol="features")
+model = lr.fit(test)
+
+predictions_df = model.transform(test)
+predictions_df.show(5)
+
+result = predictions_df.select("features", "Retweets", "probability", "prediction").collect()
+for row in result:
+ print("features=%s, label=%s -> prob=%s, prediction=%s"
+ % (row.features, row.Retweets, row.probability, row.prediction))

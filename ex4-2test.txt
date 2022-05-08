@@ -1,0 +1,121 @@
+
+textFile = spark.read.text("/user/chick7/COVID19/coronavirus-text-only-1000.txt")
+textFile.filter(textFile.value.contains("wear mask")).show(10,False)
+
+#3.0
+df =spark.read.option("header","true").csv("/user/data/CSC534BDA/COVID19/COVID19-worldwide.csv")
+df.select("dateRep", "cases", "deaths", "countriesAndTerritories").show()
+#FILTERING
+df.select("dateRep","cases","deaths","countriesAndTerritories").filter("countryterritoryCode == 'USA'").show()
+
+
+
+#4.0
+df2 = spark.read.option("header","true").option("inferSchema","true").csv("/user/data/CSC534BDA/COVID19/COVID19-worldwide.csv")
+
+from pyspark.sql import functions as F
+df2.groupBy("continentExp").agg(F.sum("cases"), F.sum("deaths")).show()
+#SQL equivalent
+df2.createOrReplaceTempView("covid19_stat")
+spark.sql("SELECT continentExp, sum(cases), sum(deaths) FROM covid19_stat GROUP BY continentExp").show()
+
+
+spark.sql("""SELECT countriesAndTerritories, SUM(cases) AS total_cases,
+SUM(deaths) AS total_deaths
+FROM covid19_stat
+GROUP BY countriesAndTerritories""").show(1000)
+
+spark.sql("""SELECT ContinentExp,countriesAndTerritories, SUM(cases) AS
+total_cases, SUM(deaths) AS total_deaths
+FROM covid19_stat
+GROUP BY ROLLUP(ContinentExp, countriesAndTerritories)
+ORDER BY total_cases DESC""").filter("ContinentExp =='America'").show(1000)
+
+from pyspark.sql.functions import col, to_date
+df3 = df2.withColumn("Date", to_date(col('dateRep'), 'MM/dd/yy'))
+df3.printSchema()
+df3.createOrReplaceTempView("covid19_stat_date")
+spark.sql("""
+SELECT
+countryterritoryCode AS country,
+date,
+cases,
+SUM(cases) OVER(
+PARTITION BY countryterritoryCode
+ORDER BY date
+) AS running_total
+FROM covid19_stat_date
+""").filter("countryterritoryCode == 'USA'").show(1000)
+
+
+
+Write and run a Spark command (not SQL query) to show the date when # of deaths was serious
+(more than 800 deaths), as well as # of confirmed cases, # of deaths, and country using filter
+function. Output should be like one below.
+just show usa
+
+df2.select("dateRep","cases","deaths","countriesAndTerritories").filter("deaths > 800").filter("countryterritoryCode == 'USA'").show(1000)
+
+
+
+
+
+
+
+
+Write and run a Spark SQL query, e.g. spark.sql("""..."""), or Spark command to calculate delta
+(the changes) of cases from previous day. Output should be like one below
+Note: Country is an alias of the countryterritoryCode column
+Note2: No need to include all output data in the screenshots, just first three lines and last three
+lines of the output data.
+Note3: Write commands/queries for all countries but show U.S.A. data only for display purpose.
+
+
+spark.sql("""
+SELECT
+countryterritoryCode AS country,
+date,
+cases,
+cases - LAG(cases,1) OVER(
+PARTITION BY countryterritoryCode
+ORDER BY date
+) AS cases_delta
+FROM covid19_stat_date
+""").filter("countryterritoryCode == 'USA'").show(1000)
+
+
+
+Write and run a Spark SQL query, e.g. spark.sql("""...""") or Spark command to find the
+countries with the highest number of confirmed cases each day among all countries during the
+period from Oct. 11 to Oct. 18 2020, using ‘Rank() OVER(...)’. Output should be like one below
+
+spark.sql("""
+
+SELECT
+date,
+countryterritoryCode AS country,
+cases,
+
+RANK() OVER(PARTITION BY countriesAndTerritories ORDER BY cases DESC) ranks
+FROM covid19_stat_date 
+WHERE date>='2020-10-11' AND date <='2020-10-18'
+ORDER BY date, ranks
+""").show(1000)
+
+----
+
+spark.sql("""
+SELECT date, country, cases FROM 
+
+(SELECT
+date,
+countryterritoryCode AS country,
+cases,
+
+RANK() OVER(PARTITION BY date ORDER BY cases DESC) AS ranks
+FROM covid19_stat_date 
+WHERE date>='2020-10-11' AND date <='2020-10-18')
+
+ORDER BY date, ranks
+""").filter("ranks == '1'").show(1000)
+

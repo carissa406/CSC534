@@ -1,0 +1,406 @@
+import os
+# Install java
+! apt-get update -qq
+! apt-get install -y openjdk-8-jdk-headless -qq > /dev/null
+os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-8-openjdk-amd64"
+os.environ["PATH"] = os.environ["JAVA_HOME"] + "/bin:" + os.environ["PATH"]
+! java -version
+# Install pyspark
+! pip install --ignore-installed pyspark==2.4.4
+# Install Spark NLP
+! pip install --ignore-installed spark-nlp==2.6.3
+
+from pyspark.sql import SparkSession
+from pyspark.ml import Pipeline
+from sparknlp.base import *
+from sparknlp.annotator import *
+from sparknlp.pretrained import PretrainedPipeline
+import sparknlp
+spark = sparknlp.start()
+print("Spark NLP version: ", sparknlp.version())
+print("Apache Spark version: ", spark.version)
+
+from pathlib import Path
+import urllib.request
+download_path = "./abcnews-date-text.csv"
+if not Path(download_path).is_file():
+ print("File Not found will downloading it!")
+ url = "https://github.com/ravishchawla/topic_modeling/raw/master/data/abcnews-date-text.csv"
+ urllib.request.urlretrieve(url, download_path)
+else:
+ print("File already present.")
+ 
+ # if you are reading file from local storage
+file_location = r'./abcnews-date-text.csv'
+# if you are reading file from hdfs
+# file_location = r'hdfs:\\\user\path\to\abcnews_date_txt.csv'
+file_type = "csv"
+# CSV options
+infer_schema = "true"
+first_row_is_header = "true"
+delimiter = ","
+df = spark.read.format(file_type) \
+ .option("inferSchema", infer_schema) \
+ .option("header", first_row_is_header) \
+ .option("sep", delimiter) \
+ .load(file_location)
+# Verify the count
+df.count()
+
+-------------------------------------------------------------
+#convert to document
+document_assembler = DocumentAssembler() \
+ .setInputCol("headline_text") \
+ .setOutputCol("document") \
+ .setCleanupMode("shrink")
+ 
+#split sentence to tokens(array)
+tokenizer = Tokenizer() \
+ .setInputCols(["document"]) \
+ .setOutputCol("token")
+ 
+ #normalizing
+ normalizer = Normalizer() \
+ .setInputCols(["token"]) \
+ .setOutputCol("normalized")
+ 
+ #stopword removal
+ stopwords_cleaner = StopWordsCleaner()\
+ .setInputCols("normalized")\
+ .setOutputCol("cleanTokens")\
+ .setCaseSensitive(False)
+ 
+ #stemming
+ stemmer = Stemmer() \
+ .setInputCols(["cleanTokens"]) \
+ .setOutputCol("stem")
+ 
+ #finishing back to array of tokens
+ finisher = Finisher() \
+ .setInputCols(["stem"]) \
+ .setOutputCols(["tokens"]) \
+ .setOutputAsArray(True) \
+ .setCleanAnnotations(False)
+ 
+ #build ML pipeline
+ nlp_pipeline = Pipeline(
+ stages=[document_assembler,
+ tokenizer,
+ normalizer,
+ stopwords_cleaner,
+ stemmer,
+ finisher])
+ 
+ #train and apply the ML pipeline
+ nlp_model = nlp_pipeline.fit(df)
+processed_df = nlp_model.transform(df)
+tokens_df = processed_df.select('publish_date','tokens').limit(10000)
+tokens_df.show()
+
+-----------------------------------------
+
+#countvectorizer to generate features from text data
+from pyspark.ml.feature import CountVectorizer
+cv = CountVectorizer(inputCol="tokens", outputCol="features",
+vocabSize=500, minDF=3.0)
+# train the model
+cv_model = cv.fit(tokens_df)
+# transform the data. Output column name will be features.
+vectorized_tokens = cv_model.transform(tokens_df)
+
+#build Latent Dirichlet Allocation model
+from pyspark.ml.clustering import LDA
+num_topics = 3
+lda = LDA(k=num_topics, maxIter=10)
+model = lda.fit(vectorized_tokens)
+ll = model.logLikelihood(vectorized_tokens)
+lp = model.logPerplexity(vectorized_tokens)
+print("The lower bound on the log likelihood of the entire corpus: " +
+str(ll))
+print("The upper bound on perplexity: " + str(lp))
+
+#visualize the topics
+# extract vocabulary from CountVectorizer
+vocab = cv_model.vocabulary
+topics = model.describeTopics()
+topics_rdd = topics.rdd
+topics_words = topics_rdd\
+ .map(lambda row: row['termIndices'])\
+ .map(lambda idx_list: [vocab[idx] for idx in idx_list])\
+ .collect()
+for idx, topic in enumerate(topics_words):
+ print("topic: {}".format(idx))
+ print("*"*25)
+ for word in topic:
+ print(word)
+ print("*"*25)
+ 
+ --------------------------------------------------------------------
+ 
+ #build Latent Dirichlet Allocation model
+from pyspark.ml.clustering import LDA
+num_topics = 3
+lda = LDA(k=num_topics, maxIter=5)
+model = lda.fit(vectorized_tokens)
+ll = model.logLikelihood(vectorized_tokens)
+lp = model.logPerplexity(vectorized_tokens)
+print("The lower bound on the log likelihood of the entire corpus: " +
+str(ll))
+print("The upper bound on perplexity: " + str(lp))
+
+#visualize the topics
+# extract vocabulary from CountVectorizer
+vocab = cv_model.vocabulary
+topics = model.describeTopics()
+topics_rdd = topics.rdd
+topics_words = topics_rdd\
+ .map(lambda row: row['termIndices'])\
+ .map(lambda idx_list: [vocab[idx] for idx in idx_list])\
+ .collect()
+for idx, topic in enumerate(topics_words):
+  print("topic: {}".format(idx))
+  print("*"*25)
+  for word in topic:
+    print(word)
+  print("*"*25)
+  
+  --------
+  
+
+from pyspark.ml.clustering import LDA
+num_topics = 5
+lda = LDA(k=num_topics, maxIter=20)
+model = lda.fit(vectorized_tokens)
+ll = model.logLikelihood(vectorized_tokens)
+lp = model.logPerplexity(vectorized_tokens)
+print("The lower bound on the log likelihood of the entire corpus: " +
+str(ll))
+print("The upper bound on perplexity: " + str(lp))
+
+vocab = cv_model.vocabulary
+topics = model.describeTopics()
+topics_rdd = topics.rdd
+topics_words = topics_rdd\
+ .map(lambda row: row['termIndices'])\
+ .map(lambda idx_list: [vocab[idx] for idx in idx_list])\
+ .collect()
+for idx, topic in enumerate(topics_words):
+  print("topic: {}".format(idx))
+  print("*"*25)
+  for word in topic:
+    print(word)
+  print("*"*25)
+  
+  -----------
+  
+from pyspark.ml.clustering import LDA
+num_topics = 5
+lda = LDA(k=num_topics, maxIter=10)
+model = lda.fit(vectorized_tokens)
+ll = model.logLikelihood(vectorized_tokens)
+lp = model.logPerplexity(vectorized_tokens)
+print("The lower bound on the log likelihood of the entire corpus: " +
+str(ll))
+print("The upper bound on perplexity: " + str(lp))
+
+vocab = cv_model.vocabulary
+topics = model.describeTopics()
+topics_rdd = topics.rdd
+topics_words = topics_rdd\
+ .map(lambda row: row['termIndices'])\
+ .map(lambda idx_list: [vocab[idx] for idx in idx_list])\
+ .collect()
+for idx, topic in enumerate(topics_words):
+  print("topic: {}".format(idx))
+  print("*"*25)
+  for word in topic:
+    print(word)
+  print("*"*25)
+  
+  -------
+  
+from pyspark.ml.clustering import LDA
+num_topics = 2
+lda = LDA(k=num_topics, maxIter=10)
+model = lda.fit(vectorized_tokens)
+ll = model.logLikelihood(vectorized_tokens)
+lp = model.logPerplexity(vectorized_tokens)
+print("The lower bound on the log likelihood of the entire corpus: " +
+str(ll))
+print("The upper bound on perplexity: " + str(lp))
+
+vocab = cv_model.vocabulary
+topics = model.describeTopics()
+topics_rdd = topics.rdd
+topics_words = topics_rdd\
+ .map(lambda row: row['termIndices'])\
+ .map(lambda idx_list: [vocab[idx] for idx in idx_list])\
+ .collect()
+for idx, topic in enumerate(topics_words):
+  print("topic: {}".format(idx))
+  print("*"*25)
+  for word in topic:
+    print(word)
+  print("*"*25)
+  
+  
+  
+scp chick7@cscluster.uis.edu:/home/data/CSC534BDA/datasets/COVID19/coronavirus-text-only-1000.txt C:\Users\hicks\OneDrive
+
+scp chick7@cscluster.uis.edu:/home/data/CSC534BDA/datasets/COVID19/* C:\Users\hicks\OneDrive\Documents\UIS\Spring2022
+
+--------------- USING COVID DATASET --------------------------
+
+import os
+# Install java
+! apt-get update -qq
+! apt-get install -y openjdk-8-jdk-headless -qq > /dev/null
+os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-8-openjdk-amd64"
+os.environ["PATH"] = os.environ["JAVA_HOME"] + "/bin:" + os.environ["PATH"]
+! java -version
+# Install pyspark
+! pip install --ignore-installed pyspark==2.4.4
+# Install Spark NLP
+! pip install --ignore-installed spark-nlp==2.6.3
+
+from pyspark.sql import SparkSession
+from pyspark.ml import Pipeline
+from sparknlp.base import *
+from sparknlp.annotator import *
+from sparknlp.pretrained import PretrainedPipeline
+import sparknlp
+spark = sparknlp.start()
+print("Spark NLP version: ", sparknlp.version())
+print("Apache Spark version: ", spark.version)
+ 
+ # if you are reading file from local storage
+file_location = '/content/coronavirus-text-only-1000.txt'
+file_type = "csv"
+# CSV options
+infer_schema = "true"
+first_row_is_header = "true"
+delimiter = ","
+df = spark.read.format(file_type) \
+ .option("inferSchema", infer_schema) \
+ .option("header", first_row_is_header) \
+ .option("sep", delimiter) \
+ .load(file_location)
+# Verify the count
+df.count()
+
+-------------------------------------------------------------
+#convert to document
+document_assembler = DocumentAssembler() \
+ .setInputCol("text") \
+ .setOutputCol("document") \
+ .setCleanupMode("shrink")
+ 
+#split sentence to tokens(array)
+tokenizer = Tokenizer() \
+ .setInputCols(["document"]) \
+ .setOutputCol("token")
+ 
+ #normalizing
+ normalizer = Normalizer() \
+ .setInputCols(["token"]) \
+ .setOutputCol("normalized")
+ 
+ #stopword removal
+ stopwords_cleaner = StopWordsCleaner()\
+ .setInputCols("normalized")\
+ .setOutputCol("cleanTokens")\
+ .setCaseSensitive(False)
+ 
+ #stemming
+ stemmer = Stemmer() \
+ .setInputCols(["cleanTokens"]) \
+ .setOutputCol("stem")
+ 
+ #finishing back to array of tokens
+ finisher = Finisher() \
+ .setInputCols(["stem"]) \
+ .setOutputCols(["tokens"]) \
+ .setOutputAsArray(True) \
+ .setCleanAnnotations(False)
+ 
+ #build ML pipeline
+ nlp_pipeline = Pipeline(
+ stages=[document_assembler,
+ tokenizer,
+ normalizer,
+ stopwords_cleaner,
+ stemmer,
+ finisher])
+ 
+ #train and apply the ML pipeline
+ nlp_model = nlp_pipeline.fit(df)
+processed_df = nlp_model.transform(df)
+tokens_df = processed_df.select('publish_date','tokens').limit(10000)
+tokens_df.show()
+
+
+#stopwords_cleaner
+-----------------------------------------
+
+#countvectorizer to generate features from text data
+from pyspark.ml.feature import CountVectorizer
+cv = CountVectorizer(inputCol="tokens", outputCol="features",
+vocabSize=500, minDF=3.0)
+# train the model
+cv_model = cv.fit(tokens_df)
+# transform the data. Output column name will be features.
+vectorized_tokens = cv_model.transform(tokens_df)
+
+#build Latent Dirichlet Allocation model
+from pyspark.ml.clustering import LDA
+num_topics = 3
+lda = LDA(k=num_topics, maxIter=10)
+model = lda.fit(vectorized_tokens)
+ll = model.logLikelihood(vectorized_tokens)
+lp = model.logPerplexity(vectorized_tokens)
+print("The lower bound on the log likelihood of the entire corpus: " +
+str(ll))
+print("The upper bound on perplexity: " + str(lp))
+
+#visualize the topics
+# extract vocabulary from CountVectorizer
+vocab = cv_model.vocabulary
+topics = model.describeTopics()
+topics_rdd = topics.rdd
+topics_words = topics_rdd\
+ .map(lambda row: row['termIndices'])\
+ .map(lambda idx_list: [vocab[idx] for idx in idx_list])\
+ .collect()
+for idx, topic in enumerate(topics_words):
+ print("topic: {}".format(idx))
+ print("*"*25)
+ for word in topic:
+  print(word)
+ print("*"*25)
+ 
+ --------------------------------------------------------------------
+ 
+
+from pyspark.ml.clustering import LDA
+num_topics = 500
+lda = LDA(k=num_topics, maxIter=100)
+model = lda.fit(vectorized_tokens)
+ll = model.logLikelihood(vectorized_tokens)
+lp = model.logPerplexity(vectorized_tokens)
+print("The lower bound on the log likelihood of the entire corpus: " +
+str(ll))
+print("The upper bound on perplexity: " + str(lp))
+
+vocab = cv_model.vocabulary
+topics = model.describeTopics()
+topics_rdd = topics.rdd
+topics_words = topics_rdd\
+ .map(lambda row: row['termIndices'])\
+ .map(lambda idx_list: [vocab[idx] for idx in idx_list])\
+ .collect()
+for idx, topic in enumerate(topics_words):
+  print("topic: {}".format(idx))
+  print("*"*25)
+  for word in topic:
+    print(word)
+  print("*"*25)

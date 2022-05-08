@@ -1,0 +1,168 @@
+hive
+
+SELECT driverid, eventType, count(*)
+FROM csc534.chick7_truck_event
+GROUP BY driverId, eventType;
+
+set hive.cli.print.header=true;
+
+SELECT driverId, count(*)
+FROM csc534.chick7_truck_event
+GROUP BY driverid;
+
+SELECT driverid, eventType, count(*) AS total
+FROM csc534.chick7_truck_event
+GROUP BY driverId, eventType
+UNION ALL
+SELECT driverid, null as eventType, count(*) AS total
+FROM csc534.chick7_truck_event
+GROUP BY driverid;
+
+SELECT driverId, eventType, count(*) AS occurance
+FROM csc534.chick7_truck_event
+GROUP BY driverId, eventType
+GROUPING SETS ((driverId, eventType), driverId);
+
+--------
+
+CREATE TABLE csc534.chick7_unusual_events
+STORED AS ORC
+AS
+SELECT driverId, count(*) AS occurence
+FROM csc534.chick7_truck_event
+WHERE eventType != 'Normal'
+GROUP BY driverId;
+
+SELECT *
+FROM csc534.chick7_unusual_events
+LIMIT 5;
+
+CREATE TABLE csc534.chick7_totals
+STORED AS ORC
+AS
+SELECT driverId, sum(hours_logged) AS total_hours, sum(miles_logged) AS total_miles
+FROM csc534.chick7_timesheet
+GROUP BY driverId; 
+
+SELECT *
+FROM csc534.chick7_totals
+LIMIT 5;
+
+CREATE TABLE csc534.chick7_joined
+STORED AS ORC
+AS
+SELECT u.driverId, u.occurence, t.total_hours, t.total_miles
+FROM csc534.chick7_unusual_events u
+JOIN csc534.chick7_totals t
+ON (u.driverId = t.driverId);
+
+SELECT *
+FROM csc534.chick7_joined
+LIMIT 5;
+
+SELECT driverid, occurence, total_hours, total_miles, total_miles/occurence AS
+riskfactor
+FROM csc534.chick7_joined
+ORDER BY riskfactor ASC
+LIMIT 5;
+
+----------------
+
+SELECT driverId, eventType, count(*) AS occurance
+FROM csc534.chick7_truck_event
+GROUP BY driverId, eventType WITH ROLLUP
+LIMIT 10;
+
+SELECT driverId, eventType, count(*) AS occurance
+FROM csc534.chick7_truck_event
+GROUP BY driverId, eventType WITH CUBE
+LIMIT 10;
+
+----------------------------------------------------
+
+head /home/data/CSC534BDA/datasets/Titanic/titanic.csv
+
+hadoop fs -copyFromLocal /home/data/CSC534BDA/datasets/Titanic/titanic.csv
+
+hive
+use csc534;
+
+CREATE TABLE csc534.chick7_titanic(
+PassengerId int ,Survived int,Pclass int,Name String,Sex String,Age int,SibSp int,Parch int,Ticket String,Fare int ,Cabin String,Embarked String)
+COMMENT 'titanic'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ',' ESCAPED BY '"'
+LINES TERMINATED BY '\n'
+STORED AS TEXTFILE
+TBLPROPERTIES('skip.header.line.count'='1');
+
+LOAD DATA INPATH 'titanic.csv' INTO TABLE 
+csc534.chick7_titanic;
+
+SELECT * FROM csc534.chick7_titanic;
+
+select count(*) FROM csc534.chick7_titanic;
+
+ wc -l /home/data/CSC534BDA/datasets/Titanic/titanic.csv
+
+SET hive.cli.print.header=true;
+
+
+
+
+
+SELECT Survived, sex, count(*) AS total, sum(Survived)/count(*) AS survival_rate
+FROM csc534.chick7_titanic
+GROUP BY Survived, sex;
+
+
+
+CREATE TABLE csc534.chick7_titanic(
+PassengerId int ,Survived int,Pclass int,Name String,Sex String,Age int,SibSp int,Parch int,Ticket String,Fare int ,Cabin String,Embarked String)
+COMMENT 'titanic'
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+STORED AS TEXTFILE
+TBLPROPERTIES('skip.header.line.count'='1');
+
+
+
+drop table csc534.chick7_titanic;
+hadoop fs -copyFromLocal /home/data/CSC534BDA/datasets/Titanic/titanic.csv
+LOAD DATA INPATH 'titanic.csv' INTO TABLE 
+csc534.chick7_titanic;
+
+
+
+
+CREATE TABLE csc534.chick7_ss
+STORED AS ORC
+AS
+SELECT Survived, sex, count(*) AS total
+FROM csc534.chick7_titanic
+GROUP BY Survived, sex;
+
+CREATE TABLE csc534.chick7_r
+STORED AS ORC
+AS
+SELECT Survived, sum(Survived)/count(*) AS survival_rate
+FROM csc534.chick7_titanic
+GROUP BY Survived;
+
+CREATE TABLE csc534.chick7_sj
+STORED AS ORC
+AS
+SELECT u.Survived, u.sex, u.total, t.survival_rate
+FROM csc534.chick7_ss u
+JOIN csc534.chick7_r t
+ON (u.Survived = t.Survived);
+
+select Survived, sex, total, survival_rate
+FROM csc534.chick7_sj
+GROUP BY Survived, sex, total, survival_rate
+GROUPING SETS ((Survived, sex, total, survival_rate), Survived, sex, ());
+
+
+
+GROUPING SETS ((survival_rate, total), (survival_rate, total, sex), (survival_rate, total, Survived));
+
+(survival_rate, total), (survival_rate, total, Survived),(survival_rate, total, sex), Survived)
